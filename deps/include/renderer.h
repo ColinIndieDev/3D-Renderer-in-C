@@ -132,6 +132,17 @@ r_vec3 norm_to_screen(r_vec3 norm) {
     return (r_vec3){x, y, norm.z};
 }
 
+r_rgba blend_over(r_rgba s, r_rgba d) {
+    r_rgba o;
+    float sa = s.a / 255.0f;
+    float da = d.a / 255.0f;
+    o.r = s.r * sa + d.r * da * (1.0f - sa);
+    o.g = s.g * sa + d.g * da * (1.0f - sa);
+    o.b = s.b * sa + d.b * da * (1.0f - sa);
+    o.a = 255.0f * (sa + da * (1.0f - sa));
+    return o;
+}
+
 void rasterize(r_shader *s, r_vec9 a_norm, r_vec9 b_norm, r_vec9 c_norm) {
     if (a_norm.w <= 0.0f || b_norm.w <= 0.0f || c_norm.w <= 0.0f) {
         return;
@@ -189,6 +200,13 @@ void rasterize(r_shader *s, r_vec9 a_norm, r_vec9 b_norm, r_vec9 c_norm) {
 
                 r_rgba col_norm = s->fragment((r_vec3){x, y, z}, interpolated_normal, final_u, final_v);
                 r_rgba col = (r_rgba){col_norm.r * 255, col_norm.g * 255, col_norm.b * 255, col_norm.a * 255};
+                r_rgba pixel;
+                r_uint32 i = (y * screen_width + x) * 4;
+                pixel.r = (float)pixels[i];
+                pixel.g = (float)pixels[i + 1];
+                pixel.b = (float)pixels[i + 2];
+                pixel.a = (float)pixels[i + 3];
+                col = blend_over(col, pixel);
                 draw_pixel(x, y, col);
                 depth_buffer[y * screen_width + x] = z;
             }
@@ -204,6 +222,18 @@ void draw_arrays(r_shader *s, void *vertices, r_uint64 n) {
         r_vec9 a = s->vertex(vertices, i);
         r_vec9 b = s->vertex(vertices, i + 1);
         r_vec9 c = s->vertex(vertices, i + 2);
+        rasterize(s, a, b, c);
+    }
+}
+
+void draw_elements(r_shader *s, void *vertices, r_uint32 *indices, r_uint64 ni) {
+    if (ni % 3 != 0 || ni == 0) {
+        return;
+    }
+    for (int i = 0; i < ni; i += 3) {
+        r_vec9 a = s->vertex(vertices, indices[i]);
+        r_vec9 b = s->vertex(vertices, indices[i + 1]);
+        r_vec9 c = s->vertex(vertices, indices[i + 2]);
         rasterize(s, a, b, c);
     }
 }

@@ -1,13 +1,15 @@
 #define RENDERER_IMPL
 #include <renderer.h>
 
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+
 #include <assimp/cimport.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
 #include <cpstd/rand.h>
 #include <cpstd/vector.h>
-#include <cplt/cplt.h>
 #include <stdbool.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -16,6 +18,128 @@
 #define KEY_ESCAPE(b, n) ((n) == 1 && (b)[0] == 0x1b)
 #define KEY_ENTER(b) ((b)[0] == 0x0d)
 #define KEY_BACKSPACE(b) ((b)[0] == 0x7f || (b)[0] == 0x08)
+
+uint32_t fb_tex, fbo, vao, vbo;
+uint32_t shader;
+
+char *shader_read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    unsigned int size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char *buffer = malloc(size + 1);
+    if (!buffer) {
+        fclose(f);
+        return NULL;
+    }
+
+    unsigned int read = fread(buffer, 1, size, f);
+    fclose(f);
+
+    if (read != size) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer[size] = '\0';
+    return buffer;
+}
+
+void init_gl(uint32_t width, uint32_t height) {
+    char *vert_code = shader_read_file("shaders/shader.vert");
+    char *frag_code = shader_read_file("shaders/shader.frag");
+    unsigned int vert = 0;
+    unsigned int frag = 0;
+    vert = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vert, 1, (const GLchar *const *)&vert_code, NULL);
+    glCompileShader(vert);
+    frag = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(frag, 1, (const GLchar *const *)&frag_code, NULL);
+    glCompileShader(frag);
+    shader = glCreateProgram();
+    glAttachShader(shader, vert);
+    glAttachShader(shader, frag);
+    glLinkProgram(shader);
+    free(vert_code);
+    free(frag_code);
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+
+    glGenTextures(1, &fb_tex);
+    glBindTexture(GL_TEXTURE_2D, fb_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    float vertices[] = {
+        -1.0f,  1.0f,  0.0f, 0.0f,   
+         1.0f,  1.0f,  1.0f, 0.0f,   
+         1.0f, -1.0f,  1.0f, 1.0f,   
+        -1.0f, -1.0f,  0.0f, 1.0f,   
+        -1.0f,  1.0f,  0.0f, 0.0f,   
+         1.0f, -1.0f,  1.0f, 1.0f    
+    };
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), &vertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), NULL);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+}
+
+void render_gl() {
+    glBindTexture(GL_TEXTURE_2D, fb_tex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, screen_width, screen_height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glViewport(0, 0, screen_width, screen_height);
+    glBindVertexArray(vao);
+    glUseProgram(shader);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fb_tex);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
+void resize_gl(uint32_t width, uint32_t height) {
+    glBindTexture(GL_TEXTURE_2D, fb_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glViewport(0, 0, width, height);
+}
+
+GLFWwindow *window = NULL;
+
+void framebuffer_size_callback(GLFWwindow *w, int width, int height) {
+    resize_gl(width, height);
+    resize_renderer(width, height);
+    mat4f_perspective(&perspective, 0.01f, 1000.0f, math_rad(45.0f), (float)width / height);
+}
+void mouse_callback(GLFWwindow *window, double x_in, double y_in);
+
+void init_glfw(uint32_t width, uint32_t height, const char *title) {
+    if (width == 0 || height == 0) {
+        exit(-1);
+    }
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    window = glfwCreateWindow(width, height, title, NULL, NULL);
+    glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    if (!gladLoadGLLoader((GLADloadproc)(glfwGetProcAddress))) {
+        exit(-1);
+    }
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+}
 
 typedef struct {
     vec3f pos;
@@ -30,9 +154,9 @@ typedef struct {
     bool first_mouse;
 } cam3D_t;
 
+/*
 float cube_vertices[] = {
     // Front (-Z)
-    // x,    y,    z,     nx,   ny,   nz,    u,    v
     -1.0f, -1.0f, -1.0f,  0.0f, 0.0f, -1.0f,  0.0f, 0.0f,
      1.0f,  1.0f, -1.0f,  0.0f, 0.0f, -1.0f,  1.0f, 1.0f,
      1.0f, -1.0f, -1.0f,  0.0f, 0.0f, -1.0f,  1.0f, 0.0f,
@@ -79,6 +203,71 @@ float cube_vertices[] = {
      1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
      1.0f,  1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
      1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f
+};
+*/
+
+float cube_vertices[] = {
+    // Front (-Z)
+    -1.0f, -1.0f, -1.0f,   0.0f,  0.0f, -1.0f,   0.0f, 0.0f,
+     1.0f, -1.0f, -1.0f,   0.0f,  0.0f, -1.0f,   1.0f, 0.0f,
+     1.0f,  1.0f, -1.0f,   0.0f,  0.0f, -1.0f,   1.0f, 1.0f,
+    -1.0f,  1.0f, -1.0f,   0.0f,  0.0f, -1.0f,   0.0f, 1.0f,
+
+    // Back (+Z)
+    -1.0f, -1.0f,  1.0f,   0.0f,  0.0f,  1.0f,   1.0f, 0.0f,
+     1.0f, -1.0f,  1.0f,   0.0f,  0.0f,  1.0f,   0.0f, 0.0f,
+     1.0f,  1.0f,  1.0f,   0.0f,  0.0f,  1.0f,   0.0f, 1.0f,
+    -1.0f,  1.0f,  1.0f,   0.0f,  0.0f,  1.0f,   1.0f, 1.0f,
+
+    // Top (+Y)
+    -1.0f,  1.0f, -1.0f,   0.0f,  1.0f,  0.0f,   0.0f, 0.0f,
+     1.0f,  1.0f, -1.0f,   0.0f,  1.0f,  0.0f,   1.0f, 0.0f,
+     1.0f,  1.0f,  1.0f,   0.0f,  1.0f,  0.0f,   1.0f, 1.0f,
+    -1.0f,  1.0f,  1.0f,   0.0f,  1.0f,  0.0f,   0.0f, 1.0f,
+
+    // Bottom (-Y)
+    -1.0f, -1.0f, -1.0f,   0.0f, -1.0f,  0.0f,   0.0f, 1.0f,
+     1.0f, -1.0f, -1.0f,   0.0f, -1.0f,  0.0f,   1.0f, 1.0f,
+     1.0f, -1.0f,  1.0f,   0.0f, -1.0f,  0.0f,   1.0f, 0.0f,
+    -1.0f, -1.0f,  1.0f,   0.0f, -1.0f,  0.0f,   0.0f, 0.0f,
+
+    // Left (-X)
+    -1.0f, -1.0f, -1.0f,  -1.0f,  0.0f,  0.0f,   1.0f, 0.0f,
+    -1.0f, -1.0f,  1.0f,  -1.0f,  0.0f,  0.0f,   0.0f, 0.0f,
+    -1.0f,  1.0f,  1.0f,  -1.0f,  0.0f,  0.0f,   0.0f, 1.0f,
+    -1.0f,  1.0f, -1.0f,  -1.0f,  0.0f,  0.0f,   1.0f, 1.0f,
+
+    // Right (+X)
+     1.0f, -1.0f, -1.0f,   1.0f,  0.0f,  0.0f,   0.0f, 0.0f,
+     1.0f, -1.0f,  1.0f,   1.0f,  0.0f,  0.0f,   1.0f, 0.0f,
+     1.0f,  1.0f,  1.0f,   1.0f,  0.0f,  0.0f,   1.0f, 1.0f,
+     1.0f,  1.0f, -1.0f,   1.0f,  0.0f,  0.0f,   0.0f, 1.0f 
+};
+
+uint32_t cube_indices[] = {
+    // Front (-Z)
+    0, 2, 1,
+    0, 3, 2,
+
+    // Back (+Z)
+    4, 5, 6,
+    4, 6, 7,
+
+    // Top (+Y)
+    8, 10, 9,
+    8, 11, 10,
+
+    // Bottom (-Y)
+    12, 13, 14,
+    12, 14, 15,
+
+    // Left (-X)
+    16, 19, 18,
+    16, 18, 17,
+
+    // Right (+X)
+    20, 22, 21,
+    20, 23, 22
 };
 
 vec3f plane_vertices[] = {
@@ -172,6 +361,67 @@ bool is_sphere_visible(frustum_t *f, vec3f center, float radius) {
     return true;
 }
 
+cam3D_t cam3D;
+frustum_t frustum;
+
+void mouse_callback(GLFWwindow *window, double x_in, double y_in) {
+    float x_pos = (float)x_in;
+    float y_pos = (float)y_in;
+
+    if (cam3D.first_mouse) {
+        cam3D.last_x = x_pos;
+        cam3D.last_y = y_pos;
+        cam3D.first_mouse = false;
+    }
+
+    float xoff = x_pos - cam3D.last_x;
+    float yoff = cam3D.last_y - y_pos;
+
+    cam3D.last_x = x_pos;
+    cam3D.last_y = y_pos;
+
+    xoff *= cam3D.sensitivity;
+    yoff *= cam3D.sensitivity;
+
+    cam3D.yaw += xoff;
+    cam3D.pitch += yoff;
+
+    cam3D.pitch = math_min(cam3D.pitch, 89.0f);
+    cam3D.pitch = math_max(cam3D.pitch, -89.0f);
+
+    vec3f front;
+    front.x = cosf(math_rad(cam3D.yaw)) * cosf(math_rad(cam3D.pitch));
+    front.y = sinf(math_rad(cam3D.pitch));
+    front.z = sinf(math_rad(cam3D.yaw)) * cosf(math_rad(cam3D.pitch));
+    cam3D.front = vec3f_norm(front);
+}
+
+vec3f get_sphere_vertex(int i, int j) {
+    float radius = 1.0f;
+    float theta_step = MATH_PI / LAT_BANDS;
+    float phi_step = 2.0f * MATH_PI / LONG_BANDS;
+
+    float theta = i * theta_step;
+    float phi = j * phi_step;
+    float sin_theta = sinf(theta);
+    float cos_theta = cosf(theta);
+    float sin_phi = sinf(phi);
+    float cos_phi = cosf(phi);
+    vec3f v;
+    v.x = radius * sin_theta * cos_phi;
+    v.y = radius * cos_theta;
+    v.z = radius * sin_theta * sin_phi;
+    return v;
+}
+
+/* vertex_t in shader.h
+typedef struct {
+    vec3f pos;
+    vec3f normal;
+    vec2f uv;
+} vertex_t;
+*/
+
 typedef struct {
     uint8_t *pixels;
     char *type;
@@ -264,8 +514,12 @@ mesh_t model_process_mesh(struct aiMesh *mesh, const struct aiScene *scene) {
 }
 
 void model_load(model_t *m, const char *path) {
-    const struct aiScene* scene = aiImportFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals |
-        aiProcess_JoinIdenticalVertices);
+    const struct aiScene* scene = aiImportFile(path, aiProcess_Triangulate | 
+                                                     aiProcess_FlipUVs |
+                                                     aiProcess_GenSmoothNormals | 
+                                                     aiProcess_JoinIdenticalVertices |
+                                                     aiProcess_PreTransformVertices |
+                                                     aiProcess_SortByPType);
 
     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) {
         printf("Error: %s\n", aiGetErrorString());
@@ -274,7 +528,6 @@ void model_load(model_t *m, const char *path) {
 
     for (int i = 0; i < scene->mNumMeshes; i++) {
         struct aiMesh* mesh = scene->mMeshes[i];
-        // mesh_t result = model_process_mesh(mesh, scene);
         vec_push(m->meshes, model_process_mesh(mesh, scene));
     }
 }
@@ -288,32 +541,13 @@ void model_destroy(model_t *m) {
     }
 }
 
-cam3D_t cam3D;
-frustum_t frustum;
-
-vec3f get_sphere_vertex(int i, int j) {
-    float radius = 1.0f;
-    float theta_step = MATH_PI / LAT_BANDS;
-    float phi_step = 2.0f * MATH_PI / LONG_BANDS;
-
-    float theta = i * theta_step;
-    float phi = j * phi_step;
-    float sin_theta = sinf(theta);
-    float cos_theta = cosf(theta);
-    float sin_phi = sinf(phi);
-    float cos_phi = cosf(phi);
-    vec3f v;
-    v.x = radius * sin_theta * cos_phi;
-    v.y = radius * cos_theta;
-    v.z = radius * sin_theta * sin_phi;
-    return v;
-}
-
 int main() {
     pcg_rand_seed();
 
-    cplt_begin();
-    init_renderer(cplt_get_screen_width(), cplt_get_screen_height());
+    init_renderer(800, 600);
+    init_glfw(800, 600, "Renderer");
+    glfwSwapInterval(0);
+    init_gl(800, 600);
     mat4f_perspective(&perspective, 0.01f, 1000.0f, math_rad(45.0f), 800.0f / 600);
     cam3D = (cam3D_t){
         .pos = {0.0f, 10.0f, 0.0f},
@@ -360,60 +594,38 @@ int main() {
     model_init(&model);
     model_load(&model, "gun.obj");
 
-    while (1) {
-        unsigned char key_buffer[3] = {0};
-        ssize_t n = 0;
-        cplt_get_key_pressed(key_buffer, &n);
+    double lastTime = glfwGetTime();
+    int frames = 0;
 
-        if (KEY_ESCAPE(key_buffer, n)) {
-            break;
-        } else if (n == 1) {
-            if (KEY_ENTER(key_buffer)) {
-            } else if (KEY_BACKSPACE(key_buffer)) {
-            } else {
-                if (key_buffer[0] == 'w') {
-                    cam3D.pos.z -= 1;
-                }
-                if (key_buffer[0] == 's') {
-                    cam3D.pos.z += 1;
-                }
-                if (key_buffer[0] == 'a') {
-                    cam3D.pos.x -= 1;
-                }
-                if (key_buffer[0] == 'd') {
-                    cam3D.pos.x += 1;
-                }
-                if (key_buffer[0] == 'g') {
-                    cam3D.pos.y += 1;
-                }
-                if (key_buffer[0] == 'b') {
-                    cam3D.pos.y -= 1;
-                }
+    while (!glfwWindowShouldClose(window)) {
+        double now = glfwGetTime();
+        frames++;
+        if (now - lastTime >= 1.0) {
+            double fps = frames / (now - lastTime);
+            char title[64];
+            snprintf(title, sizeof(title), "FPS: %.1f", fps);
+            glfwSetWindowTitle(window, title);
+            frames = 0;
+            lastTime = now;
+        }
 
-                if (key_buffer[0] == 'h') {
-                    cam3D.yaw -= 1;
-                }
-                if (key_buffer[0] == 'l') {
-                    cam3D.yaw += 1;
-                }
-                if (key_buffer[0] == 'k') {
-                    cam3D.pitch += 1;
-                }
-                if (key_buffer[0] == 'j') {
-                    cam3D.pitch -= 1;
-                }
-                if (cam3D.pitch > 89.0f)  {
-                    cam3D.pitch = 89.0f;
-                }
-                if (cam3D.pitch < -89.0f) {
-                    cam3D.pitch = -89.0f;
-                }
-                vec3f front;
-                front.x = cos(math_rad(cam3D.yaw)) * cos(math_rad(cam3D.pitch));
-                front.y = sin(math_rad(cam3D.pitch));
-                front.z = sin(math_rad(cam3D.yaw)) * cos(math_rad(cam3D.pitch));
-                cam3D.front = vec3f_norm(front);
-            }
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+            cam3D.pos.x += 1;
+        }
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+            cam3D.pos.x -= 1;
+        }
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+            cam3D.pos.z += 1;
+        }
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+            cam3D.pos.z -= 1;
+        }
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+            cam3D.pos.y += 1;
+        }
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+            cam3D.pos.y -= 1;
         }
 
         clear_background((r_rgba){0, 0, 0, 255});
@@ -427,29 +639,30 @@ int main() {
         shader_uniform_set_view_pos(cam3D.pos);
 
         rotation += 1;
-        /*
+
         for (int i = 0; i < N; ++i) {
             position = positions[i];
             if (is_sphere_visible(&frustum, position, radius)) {
-                draw_arrays(&s, cube_vertices, 36);
+                // draw_arrays(&s, cube_vertices, 36);
+                draw_elements(&s, cube_vertices, cube_indices, 36);
+
                 // draw_arrays(&s, sphere_vertices, LAT_BANDS * LONG_BANDS * 6, RENDER_TRIANGLE);
             }
         }
-        */
+
+        position = VEC3F(0, 0, 0);
 
         model_draw(&model, &s2);
 
-        for (int y = 0; y < cplt_get_screen_height(); ++y) {
-            for (int x = 0; x < cplt_get_screen_width(); ++x) {
-                int i = (y * cplt_get_screen_width() + x) * 4;
-                cplt_putc(x, y, ' ', RGB(255, 255, 255), RGB(pixels[i], pixels[i + 1], pixels[i + 2]));
-            }
-        }
-        cplt_refresh();
+        render_gl();
+        glfwSwapBuffers(window);
+        glfwPollEvents();
     }
-    cplt_end();
     cleanup_renderer();
 
     // Destroy renderer texture
     renderer_destroy_texture(&texture);
+
+    // Destroy model
+    model_destroy(&model);
 }

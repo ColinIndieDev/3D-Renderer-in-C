@@ -23,7 +23,7 @@ r_shader s = {
 
 r_shader s2 = {
     fragment_shader2,
-    vertex_shader2
+    vertex_shader
 };
 
 float rotation = 0.0f;

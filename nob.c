@@ -2,8 +2,18 @@
 #define NOB_EXPERIMENTAL_DELETE_OLD
 #include "build_tool/nob.h"
 
+// Build project for terminal or window (GLFW via OpenGL)
+// TERMINAL = 0, GLFW = 1
+#define RENDERER_TYPE 1
+
 #define CC "clang"
+// Edit path to switch between terminal and gl
+#if defined(RENDERER_TYPE) && RENDERER_TYPE == 0 
 #define SRC_FOLDER "src/"
+#else
+#define SRC_FOLDER "src_gl/"
+#endif
+
 #define BUILD_FOLDER "build/"
 #define INCLUDE_FOLDER "deps/include"
 #define LIB_FOLDER "deps/lib"
@@ -38,9 +48,22 @@ const char *src[] = {
 };
 
 const char *libs[] = {
+#if defined(RENDERER_TYPE) && RENDERER_TYPE == 0 
     "cpstd",
     "cplt",
-    "m"
+    "m",
+    "assimp",
+    "z",
+    "stdc++" // Needed since assimp needs C++ for a reason
+#else
+    "cpstd",
+    "glfw3",
+    "glad",
+    "assimp",
+    "z",
+    "m",
+    "stdc++" // Needed since assimp needs C++ for a reason
+#endif
 };
 
 int main(int argc, char *argv[]) {
