@@ -7,7 +7,6 @@
 #define RENDERER_TYPE 1
 
 #define CC "clang"
-// Edit path to switch between terminal and gl
 #if defined(RENDERER_TYPE) && RENDERER_TYPE == 0 
 #define SRC_FOLDER "src/"
 #else
@@ -44,7 +43,14 @@ const char *flags[] = {
 };
 
 const char *src[] = {
+#if defined(RENDERER_TYPE) && RENDERER_TYPE == 0
     "main.c"
+#else
+    "main.c",
+    "model.c",
+    "opengl.c",
+    "frustum.c"
+#endif
 };
 
 const char *libs[] = {

@@ -2,19 +2,16 @@
 
 #include <renderer.h>
 #include <cpstd/mathplus.h>
-
 #include <stb_image.h>
 
-typedef struct {
-    vec3f pos;
-    vec3f normal;
-    vec2f uv;
-} vertex_t;
+#include "model.h"
 
-r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, float u, float v);
-r_rgba fragment_shader2(r_vec3 frag_pos, r_vec3 normal, float u, float v);
-r_vec9 vertex_shader(void *vertices, r_uint64 vertex_id);
-r_vec9 vertex_shader2(void *vertices, r_uint64 vertex_id);
+r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv);
+r_rgba fragment_shader_model(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv);
+void vertex_shader(float *out, float *vertices, r_uint64 vertex_id);
+
+void vertex_shader_cubemap(float out[10], float *vertices, r_uint64 vertex_id);
+r_rgba fragment_shader_cubemap(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv);
 
 r_shader s = {
     fragment_shader,
@@ -22,20 +19,27 @@ r_shader s = {
 };
 
 r_shader s2 = {
-    fragment_shader2,
+    fragment_shader_model,
     vertex_shader
+};
+
+r_shader s_cubemap = {
+    fragment_shader_cubemap,
+    vertex_shader_cubemap
 };
 
 float rotation = 0.0f;
 vec3f position;
 mat4f perspective;
 mat4f view;
+mat4f view_cubemap;
 
 // "Uniforms"
 r_texture texture;
+r_cubemap cubemap;
 int twidth, theight, tchannels;
-r_rgba light_color = (r_rgba){1, 1, 1, 1};
-vec3f light_pos;
+r_rgba light_color = (r_rgba){1.0f, 0.7f, 0.7f, 1.0f};
+vec3f light_direction = VEC3F(1.0f, -2.0f, 1.0f);
 vec3f view_pos;
 
 void shader_uniform_set_view_pos(vec3f pos) {
@@ -50,7 +54,7 @@ vec3f reflect(vec3f i, vec3f n) {
     );
 }
 
-r_rgba fragment_shader2(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
+r_rgba fragment_shader_model(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv) {
     float cr = 1.0f;
     float cg = 1.0f;
     float cb = 1.0f;
@@ -62,7 +66,8 @@ r_rgba fragment_shader2(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
                               1};
 
     vec3f norm = vec3f_norm(*(vec3f *)&normal);
-    vec3f light_dir = vec3f_norm(vec3f_sub(light_pos, *(vec3f *)&frag_pos));
+    vec3f light_dir = vec3f_norm(VEC3F(-light_direction.x, -light_direction.y, -light_direction.z));
+
     float diff = math_max(vec3f_dot(norm, light_dir), 0.0f);
     r_rgba diffuse = (r_rgba){diff * light_color.r, diff * light_color.g, diff * light_color.b, 1.0f};
     
@@ -83,10 +88,10 @@ r_rgba fragment_shader2(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
     return (r_rgba){final_r, final_g, final_b, 1.0f};
 }
 
-r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
-    float cr = renderer_texture_get(&texture, u, v).r;
-    float cg = renderer_texture_get(&texture, u, v).g;
-    float cb = renderer_texture_get(&texture, u, v).b;
+r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv) {
+    float cr = renderer_texture_get(&texture, (r_vec2){uv.u, uv.v}).r;
+    float cg = renderer_texture_get(&texture, (r_vec2){uv.u, uv.v}).g;
+    float cb = renderer_texture_get(&texture, (r_vec2){uv.u, uv.v}).b;
 
     float ambient_strength = 0.1f;
     r_rgba ambient = (r_rgba){ambient_strength * light_color.r, 
@@ -95,7 +100,8 @@ r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
                               1};
 
     vec3f norm = vec3f_norm(*(vec3f *)&normal);
-    vec3f light_dir = vec3f_norm(vec3f_sub(light_pos, *(vec3f *)&frag_pos));
+    vec3f light_dir = vec3f_norm(VEC3F(-light_direction.x, -light_direction.y, -light_direction.z));
+
     float diff = math_max(vec3f_dot(norm, light_dir), 0.0f);
     r_rgba diffuse = (r_rgba){diff * light_color.r, diff * light_color.g, diff * light_color.b, 1.0f};
     
@@ -116,9 +122,9 @@ r_rgba fragment_shader(r_vec3 frag_pos, r_vec3 normal, float u, float v) {
     return (r_rgba){final_r, final_g, final_b, 1.0f};
 }
 
-r_vec9 vertex_shader(void *vertices, r_uint64 vertex_id) {
+void vertex_shader(float out[10], float *vertices, r_uint64 vertex_id) {
     float v[8];
-    memcpy(v, (float *)vertices + vertex_id * 8, sizeof(float) * 8);
+    memcpy(v, vertices + vertex_id * 8, sizeof(float) * 8);
     vec3f vertex = VEC3F(v[0], v[1], v[2]);
     vec3f normal = VEC3F(v[3], v[4], v[5]);
     vec2f uv = VEC2F(v[6], v[7]);
@@ -145,31 +151,46 @@ r_vec9 vertex_shader(void *vertices, r_uint64 vertex_id) {
     vec4f normal4 = (vec4f){normal.x, normal.y, normal.z, 0.0f};
     vec4f rotated_normal = mat4f_mul_vec4f(&normal_matrix, normal4);
 
-    return (r_vec9){result.x, result.y, result.z, result.w, rotated_normal.x, rotated_normal.y, rotated_normal.z, uv.x, uv.y};
+    out[0] = result.x;
+    out[1] = result.y;
+    out[2] = result.z;
+    out[3] = result.w;
+    out[4] = rotated_normal.x;
+    out[5] = rotated_normal.y;
+    out[6] = rotated_normal.z;
+    out[7] = uv.x;
+    out[8] = uv.y;
 }
 
-r_vec9 vertex_shader2(void *vertices, r_uint64 vertex_id) {
-    vertex_t *v_ptr = (vertex_t *)vertices;
-    vertex_t v = v_ptr[vertex_id];
-
-    vec3f vertex = v.pos;
-    vec3f normal = v.normal;
-    vec2f uv = v.uv;
+void vertex_shader_cubemap(float out[10], float *vertices, r_uint64 vertex_id) {
+    float v[3];
+    memcpy(v, (float *)vertices + vertex_id * 3, sizeof(float) * 3);
+    vec3f vertex = VEC3F(v[0], v[1], v[2]);
 
     mat4f model;
     mat4f_identity(&model);
-    mat4f_translate(&model, position);
 
     mat4f view_projection;
-    mat4f_mul(&perspective, &view, &view_projection);
+    mat4f_mul(&perspective, &view_cubemap, &view_projection);
     mat4f mvp;
     mat4f_mul(&view_projection, &model, &mvp);
 
     vec4f object = (vec4f){vertex.x, vertex.y, vertex.z, 1.0f};
     vec4f result = mat4f_mul_vec4f(&mvp, object);
 
-    vec4f normal4 = (vec4f){normal.x, normal.y, normal.z, 0.0f};
-    vec4f rotated_normal = mat4f_mul_vec4f(&model, normal4); // Verwende model statt identity rotation
+    out[0] = result.x;
+    out[1] = result.y;
+    out[2] = result.w;
+    out[3] = result.w;
+    out[4] = 0.0f;
+    out[5] = 0.0f;
+    out[6] = 0.0f;
+    out[7] = v[0];
+    out[8] = v[1];
+    out[9] = v[2];
+}
 
-    return (r_vec9){result.x, result.y, result.z, result.w, rotated_normal.x, rotated_normal.y, rotated_normal.z, uv.x, uv.y};
+r_rgba fragment_shader_cubemap(r_vec3 frag_pos, r_vec3 normal, r_vec3 uv) {
+    r_rgba color = renderer_cubemap_get(&cubemap, uv);
+    return (r_rgba){color.r, color.g * 0.5f, color.b * 0.5f, 1.0f};
 }
