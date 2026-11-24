@@ -7,3 +7,12 @@ on the terminal. Note that it is not entirely optimized or uses the GPU at any t
 But it is cool to render 3D graphics without needing a GPU and also to see how a graphical api looks like behind the scenes.
 It is also possible to write a „shader“ but unlike in OpenGL with glsl, the fragment and vertex shader are C functions
 where you need to pass the function pointer to the shader of the renderer which can be bound and used for rendering obviously
+
+## Screenshots
+I have some footage of the renderer in action in a window via GLFW and also in the terminal
+
+![img0](img/screenshot0.png)
+![img1](img/screenshot1.png)
+![img2](img/screenshot2.png)
+![img3](img/screenshot3.png)
+![img4](img/screenshot4.png)
